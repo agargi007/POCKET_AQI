@@ -1,0 +1,109 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{userId}
+    // Fields:
+    //   - uid: string (required, immutable) - Firebase Auth UID
+    //   - name: string (required, max 100 chars) - Display name
+    //   - email: string (required, email format) - User email
+    //   - age: number (optional, 0-120) - User age
+    //   - conditions: list (optional, max 10 items) - Health conditions
+    //   - selectedAvatar: number (optional, 0-7) - Avatar index
+    //   - alertThreshold: number (optional, 50-300) - AQI threshold
+    //   - lang: string (optional, en/hi) - Language preference
+    //   - darkMode: bool (optional) - UI theme
+    //   - createdAt: timestamp (required, immutable) - Creation time
+    //
+    // Collection: /users/{userId}/trends/{trendId}
+    // Fields:
+    //   - id: string (required) - Trend ID
+    //   - uid: string (required, immutable) - Owner UID
+    //   - date: string (required, ISO 8601) - Measurement date
+    //   - aqi: number (required, 0-500) - AQI value
+    //   - location: string (required, max 100 chars) - Location name
+    //   - createdAt: timestamp (required, immutable) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "gargiavinash1@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'name', 'email', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             isValidEmail(data.email) &&
+             (!('age' in data) || (data.age is int && data.age >= 0 && data.age <= 120)) &&
+             (!('conditions' in data) || (data.conditions is list && data.conditions.size() <= 10)) &&
+             (!('selectedAvatar' in data) || (data.selectedAvatar is int && data.selectedAvatar >= 0 && data.selectedAvatar <= 7)) &&
+             (!('alertThreshold' in data) || (data.alertThreshold is int && data.alertThreshold >= 50 && data.alertThreshold <= 300)) &&
+             (!('lang' in data) || (data.lang in ['en', 'hi'])) &&
+             (!('darkMode' in data) || (data.darkMode is bool)) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTrend(data) {
+      return data.keys().hasAll(['uid', 'date', 'aqi', 'location', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.aqi is int && data.aqi >= 0 && data.aqi <= 500 &&
+             data.location is string && data.location.size() > 0 && data.location.size() <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                      request.resource.data.uid == resource.data.uid &&
+                      request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+
+      match /trends/{trendId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if isOwner(userId) && isValidTrend(request.resource.data);
+        allow update: if false; // Trends are immutable
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    // Default deny
+    match /{path=**} {
+      allow read, write: if false;
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "User personalization and health profile data.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "name": { "type": "string", "description": "User's display name" },
+        "email": { "type": "string", "format": "email" },
+        "age": { "type": "integer" },
+        "conditions": { "type": "array", "items": { "type": "string" } },
+        "selectedAvatar": { "type": "integer" },
+        "alertThreshold": { "type": "integer" },
+        "lang": { "type": "string", "enum": ["en", "hi"] },
+        "darkMode": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "name", "email"]
+    },
+    "Trend": {
+      "title": "Historical Trend",
+      "description": "Saved AQI data points for historical tracking.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string", "description": "Owner's UID" },
+        "date": { "type": "string", "format": "date-time" },
+        "aqi": { "type": "integer" },
+        "location": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "date", "aqi", "location"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Individual user profile documents."
+    },
+    "/users/{userId}/trends/{trendId}": {
+      "schema": "Trend",
+      "description": "User-specific historical AQI trends."
+    }
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "name": "Pocket AQI",
+  "description": "Real-time air quality intelligence with personalized health recommendations.",
+  "requestFramePermissions": ["geolocation"]
+}
