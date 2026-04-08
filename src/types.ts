@@ -7,10 +7,19 @@ export interface PollutantData {
   o3: number;
 }
 
+export interface WeatherData {
+  temp: number;
+  humidity: number;
+  windSpeed: number;
+  description: string;
+  icon: string;
+}
+
 export interface AqiData {
   aqi: number;
   components: PollutantData;
   dt: number;
+  weather?: WeatherData;
   location?: {
     name: string;
     lat: number;

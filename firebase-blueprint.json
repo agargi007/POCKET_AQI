@@ -31,6 +31,22 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["uid", "date", "aqi", "location"]
+    },
+    "Report": {
+      "title": "Community Report",
+      "description": "User-submitted air quality reports.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "uid": { "type": "string", "description": "Reporter's UID" },
+        "userName": { "type": "string" },
+        "type": { "type": "string", "enum": ["Construction", "Traffic", "Smoke", "Industrial", "Dust"] },
+        "desc": { "type": "string" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "userName", "type", "desc", "lat", "lon"]
     }
   },
   "firestore": {
@@ -41,6 +57,10 @@
     "/users/{userId}/trends/{trendId}": {
       "schema": "Trend",
       "description": "User-specific historical AQI trends."
+    },
+    "/reports/{reportId}": {
+      "schema": "Report",
+      "description": "Global community reports."
     }
   }
 }

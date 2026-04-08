@@ -1,20 +1,8 @@
-# Python
-venv/
-__pycache__/
-*.pyc
-
-# Logs
-*.log
-*.err
-*.out
-
-# Model files
-*.pkl
-
-# Node
 node_modules/
+build/
 dist/
-
-# OS junk
+coverage/
 .DS_Store
-Thumbs.db
+*.log
+.env*
+!.env.example

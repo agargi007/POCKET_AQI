@@ -3,8 +3,6 @@ import { motion, AnimatePresence } from "motion/react";
 import { 
   User, 
   MapPin, 
-  Moon, 
-  Sun, 
   Home, 
   Briefcase, 
   Plus, 
@@ -22,7 +20,7 @@ import {
 } from "lucide-react";
 import { SavedLocation, HealthProfile } from "../types";
 import { translations, Language } from "../translations";
-import { User as FirebaseUser, db, handleFirestoreError, OperationType, doc, updateDoc } from "../firebase";
+import { User as FirebaseUser, db, handleFirestoreError, OperationType, doc, setDoc, getDoc, serverTimestamp } from "../firebase";
 
 interface ProfileProps {
   user: FirebaseUser;
@@ -33,7 +31,6 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
   const [lang, setLang] = useState<Language>(() => (localStorage.getItem("lang") as Language) || "en");
   const t = translations[lang];
 
-  const [isDarkMode, setIsDarkMode] = useState(() => localStorage.getItem("darkMode") === "true");
   const [alertThreshold, setAlertThreshold] = useState(() => parseInt(localStorage.getItem("alertThreshold") || "100"));
   const [selectedAvatar, setSelectedAvatar] = useState(() => parseInt(localStorage.getItem("selectedAvatar") || "0"));
   const [isEditing, setIsEditing] = useState(false);
@@ -44,36 +41,141 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
     return saved ? JSON.parse(saved) : { name: user.displayName || "User", age: 25, conditions: ["Asthma"] };
   });
 
-  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([
-    { id: "1", name: "Home", lat: 28.6129, lon: 77.2090, type: "home" },
-    { id: "2", name: "Office", lat: 28.5355, lon: 77.3910, type: "work" },
-  ]);
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>(() => {
+    const saved = localStorage.getItem("savedLocations");
+    return saved ? JSON.parse(saved) : [
+      { id: "1", name: "Home", lat: 28.6129, lon: 77.2090, type: "home" },
+      { id: "2", name: "Office", lat: 28.5355, lon: 77.3910, type: "work" },
+    ];
+  });
+
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [editingLocation, setEditingLocation] = useState<SavedLocation | null>(null);
+  const [newLocationName, setNewLocationName] = useState("");
+  const [newLocationLat, setNewLocationLat] = useState("");
+  const [newLocationLon, setNewLocationLon] = useState("");
+  const [newLocationType, setNewLocationType] = useState<"home" | "work" | "other">("other");
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [docExists, setDocExists] = useState(false);
 
   useEffect(() => {
+    const userRef = doc(db, "users", user.uid);
+    getDoc(userRef).then((docSnap) => {
+      if (docSnap.exists()) {
+        setDocExists(true);
+        const data = docSnap.data();
+        if (data.name) setProfile(prev => ({ ...prev, name: data.name }));
+        if (data.age) setProfile(prev => ({ ...prev, age: data.age }));
+        if (data.conditions) setProfile(prev => ({ ...prev, conditions: data.conditions }));
+        if (data.lang) setLang(data.lang);
+        if (data.selectedAvatar !== undefined) setSelectedAvatar(data.selectedAvatar);
+        if (data.alertThreshold !== undefined) setAlertThreshold(data.alertThreshold);
+        if (data.savedLocations) setSavedLocations(data.savedLocations);
+      }
+      setHasLoaded(true);
+    }).catch(err => {
+      handleFirestoreError(err, OperationType.GET, `users/${user.uid}`);
+      setHasLoaded(true);
+    });
+  }, [user.uid]);
+
+  useEffect(() => {
+    const handleStorageChange = () => {
+      const newLang = (localStorage.getItem("lang") as Language) || "en";
+      setLang(newLang);
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => window.removeEventListener("storage", handleStorageChange);
+  }, []);
+
+  useEffect(() => {
+    if (!hasLoaded) return;
+
     localStorage.setItem("lang", lang);
-    localStorage.setItem("darkMode", isDarkMode.toString());
     localStorage.setItem("alertThreshold", alertThreshold.toString());
     localStorage.setItem("selectedAvatar", selectedAvatar.toString());
     localStorage.setItem("profile", JSON.stringify(profile));
+    localStorage.setItem("savedLocations", JSON.stringify(savedLocations));
     
-    if (isDarkMode) {
-      document.documentElement.classList.add("dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-    }
+    // Trigger storage event for other components in the same window
+    window.dispatchEvent(new Event("storage"));
 
     // Sync to Firestore
     const userRef = doc(db, "users", user.uid);
-    updateDoc(userRef, {
+    const dataToSave: any = {
+      uid: user.uid,
+      email: user.email,
       name: profile.name,
       age: profile.age,
       conditions: profile.conditions,
       lang,
-      darkMode: isDarkMode,
       selectedAvatar,
-      alertThreshold
-    }).catch(err => handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`));
-  }, [lang, isDarkMode, alertThreshold, selectedAvatar, profile, user.uid]);
+      alertThreshold,
+      savedLocations,
+    };
+
+    if (!docExists) {
+      dataToSave.createdAt = serverTimestamp();
+    }
+
+    setDoc(userRef, dataToSave, { merge: true })
+      .then(() => {
+        if (!docExists) setDocExists(true);
+      })
+      .catch(err => handleFirestoreError(err, OperationType.UPDATE, `users/${user.uid}`));
+  }, [lang, alertThreshold, selectedAvatar, profile, savedLocations, user.uid, user.email, hasLoaded, docExists]);
+
+  const handleAddLocation = () => {
+    setEditingLocation(null);
+    setNewLocationName("");
+    setNewLocationLat("");
+    setNewLocationLon("");
+    setNewLocationType("other");
+    setShowLocationModal(true);
+  };
+
+  const handleEditLocation = (loc: SavedLocation) => {
+    setEditingLocation(loc);
+    setNewLocationName(loc.name);
+    setNewLocationLat(loc.lat.toString());
+    setNewLocationLon(loc.lon.toString());
+    setNewLocationType(loc.type);
+    setShowLocationModal(true);
+  };
+
+  const handleSaveLocation = () => {
+    if (!newLocationName || !newLocationLat || !newLocationLon) return;
+
+    const lat = parseFloat(newLocationLat);
+    const lon = parseFloat(newLocationLon);
+
+    if (isNaN(lat) || isNaN(lon)) return;
+
+    if (editingLocation) {
+      setSavedLocations(prev => prev.map(l => l.id === editingLocation.id ? {
+        ...l,
+        name: newLocationName,
+        lat,
+        lon,
+        type: newLocationType
+      } : l));
+    } else {
+      const newLoc: SavedLocation = {
+        id: Math.random().toString(36).substr(2, 9),
+        name: newLocationName,
+        lat,
+        lon,
+        type: newLocationType
+      };
+      setSavedLocations(prev => [...prev, newLoc]);
+    }
+    setShowLocationModal(false);
+  };
+
+  const handleDeleteLocation = (id: string) => {
+    setSavedLocations(prev => prev.filter(l => l.id !== id));
+    setShowLocationModal(false);
+  };
 
   const avatars = [
     "https://api.dicebear.com/7.x/avataaars/svg?seed=Felix",
@@ -149,6 +251,106 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
         )}
       </AnimatePresence>
 
+      {/* Location Modal */}
+      <AnimatePresence>
+        {showLocationModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowLocationModal(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-md bg-white rounded-[2.5rem] p-8 shadow-2xl overflow-hidden"
+            >
+              <div className="flex items-center gap-3 mb-6">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <MapPin size={24} />
+                </div>
+                <h3 className="text-xl font-black text-gray-900">
+                  {editingLocation ? "Edit Location" : "Add Location"}
+                </h3>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Name</label>
+                  <input 
+                    type="text"
+                    value={newLocationName}
+                    onChange={(e) => setNewLocationName(e.target.value)}
+                    placeholder="e.g. Home, Office"
+                    className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-bold"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Latitude</label>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={newLocationLat}
+                      onChange={(e) => setNewLocationLat(e.target.value)}
+                      placeholder="28.6129"
+                      className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Longitude</label>
+                    <input 
+                      type="number"
+                      step="any"
+                      value={newLocationLon}
+                      onChange={(e) => setNewLocationLon(e.target.value)}
+                      placeholder="77.2090"
+                      className="w-full p-4 bg-gray-50 border border-gray-100 rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all font-bold"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5 ml-1">Type</label>
+                  <div className="flex gap-2">
+                    {(["home", "work", "other"] as const).map((t) => (
+                      <button
+                        key={t}
+                        onClick={() => setNewLocationType(t)}
+                        className={`flex-1 py-3 rounded-xl text-xs font-bold capitalize transition-all ${
+                          newLocationType === t ? "bg-blue-600 text-white shadow-lg shadow-blue-200" : "bg-gray-50 text-gray-500 hover:bg-gray-100"
+                        }`}
+                      >
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-8">
+                {editingLocation && (
+                  <button 
+                    onClick={() => handleDeleteLocation(editingLocation.id)}
+                    className="flex-1 py-4 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-100 transition-all"
+                  >
+                    Delete
+                  </button>
+                )}
+                <button 
+                  onClick={handleSaveLocation}
+                  className="flex-[2] py-4 bg-gray-900 text-white rounded-2xl font-bold hover:bg-gray-800 transition-all shadow-xl shadow-gray-900/20"
+                >
+                  Save Location
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Profile Header */}
       <div className="flex flex-col items-center text-center p-8 bg-white rounded-3xl shadow-sm border border-gray-100">
         <div className="relative mb-6">
@@ -168,14 +370,31 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
         </div>
         
         {isEditing ? (
-          <input 
-            type="text"
-            value={profile.name}
-            onChange={(e) => setProfile({...profile, name: e.target.value})}
-            className="text-2xl font-black text-gray-900 text-center border-b-2 border-blue-600 focus:outline-none bg-transparent"
-          />
+          <div className="flex items-center gap-2">
+            <input 
+              type="text"
+              value={profile.name}
+              onChange={(e) => setProfile({...profile, name: e.target.value})}
+              className="text-2xl font-black text-gray-900 text-center border-b-2 border-blue-600 focus:outline-none bg-transparent"
+              autoFocus
+            />
+            <button 
+              onClick={() => setIsEditing(false)}
+              className="p-1 bg-blue-600 text-white rounded-lg shadow-sm"
+            >
+              <Check size={16} />
+            </button>
+          </div>
         ) : (
-          <h2 className="text-2xl font-black text-gray-900">{profile.name}</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-2xl font-black text-gray-900">{profile.name}</h2>
+            <button 
+              onClick={() => setIsEditing(true)}
+              className="p-1 text-gray-400 hover:text-blue-600 transition-colors"
+            >
+              <Edit2 size={16} />
+            </button>
+          </div>
         )}
         
         <div className="flex items-center gap-2 mt-1">
@@ -237,43 +456,23 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
             {isEditing ? (
               <input 
                 type="text"
-                value={profile.conditions.join(", ")}
+                value={profile.conditions?.join(", ") || ""}
                 onChange={(e) => setProfile({...profile, conditions: e.target.value.split(",").map(s => s.trim())})}
                 className="w-full text-lg font-black text-gray-900 bg-transparent border-b border-blue-600 focus:outline-none"
               />
             ) : (
-              <div className="text-lg font-black text-gray-900">{profile.conditions[0]}</div>
+              <div className="text-lg font-black text-gray-900">
+                {profile.conditions && profile.conditions.length > 0 ? profile.conditions[0] : "None"}
+              </div>
             )}
           </div>
         </div>
       </section>
 
       {/* Personalization Settings */}
-      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-colors">
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">{t.appearance}</h3>
         <div className="space-y-6">
-          {/* Dark Mode */}
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className={`p-2 rounded-xl ${isDarkMode ? "bg-blue-100 text-blue-600" : "bg-yellow-100 text-yellow-600"}`}>
-                {isDarkMode ? <Moon size={20} /> : <Sun size={20} />}
-              </div>
-              <div>
-                <span className="block font-bold text-gray-900">{t.darkMode}</span>
-                <span className="text-[10px] text-gray-400">Adjust app appearance</span>
-              </div>
-            </div>
-            <button 
-              onClick={() => setIsDarkMode(!isDarkMode)}
-              className={`w-12 h-6 rounded-full transition-colors relative p-1 ${isDarkMode ? "bg-blue-600" : "bg-gray-300"}`}
-            >
-              <motion.div 
-                animate={{ x: isDarkMode ? 24 : 0 }}
-                className="w-4 h-4 bg-white rounded-full shadow-sm"
-              />
-            </button>
-          </div>
-
           {/* Alert Threshold */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -300,7 +499,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
           </div>
 
           {/* Language */}
-          <div className="flex items-center justify-between">
+          <div className="space-y-4">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-green-100 text-green-600 rounded-xl">
                 <Globe size={20} />
@@ -310,21 +509,39 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
                 <span className="text-[10px] text-gray-400">System language</span>
               </div>
             </div>
-            <button 
-              onClick={toggleLang}
-              className="flex items-center gap-1 text-sm font-bold text-blue-600 bg-blue-50 px-3 py-1 rounded-lg"
-            >
-              {lang === "en" ? "English" : "हिंदी"} <ChevronRight size={16} />
-            </button>
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {[
+                { code: "en", label: "English" },
+                { code: "hi", label: "हिंदी" },
+                { code: "mr", label: "मराठी" },
+                { code: "kn", label: "ಕನ್ನಡ" },
+                { code: "ta", label: "தமிழ்" }
+              ].map((l) => (
+                <button 
+                  key={l.code}
+                  onClick={() => setLang(l.code as Language)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all ${
+                    lang === l.code 
+                      ? "bg-blue-50 text-blue-600 border-blue-200 shadow-sm" 
+                      : "bg-gray-50 text-gray-500 border-gray-100 hover:bg-gray-100"
+                  }`}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       </section>
 
       {/* Saved Locations */}
-      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-colors">
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t.savedLocations}</h3>
-          <button className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors">
+          <button 
+            onClick={handleAddLocation}
+            className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+          >
             <Plus size={18} />
           </button>
         </div>
@@ -333,15 +550,18 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
             <motion.div 
               key={loc.id} 
               whileTap={{ scale: 0.98 }}
+              onClick={() => handleEditLocation(loc)}
               className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl group hover:bg-blue-50 transition-all cursor-pointer border border-transparent hover:border-blue-100"
             >
               <div className="flex items-center gap-4">
                 <div className="p-2 bg-white rounded-xl shadow-sm text-blue-600">
-                  {loc.type === "home" ? <Home size={20} /> : <Briefcase size={20} />}
+                  {loc.type === "home" ? <Home size={20} /> : loc.type === "work" ? <Briefcase size={20} /> : <MapPin size={20} />}
                 </div>
                 <div>
                   <div className="font-bold text-gray-900">{loc.name}</div>
-                  <div className="text-[10px] text-gray-400 uppercase tracking-wider">Default Location</div>
+                  <div className="text-[10px] text-gray-400 uppercase tracking-wider">
+                    {loc.lat.toFixed(2)}, {loc.lon.toFixed(2)}
+                  </div>
                 </div>
               </div>
               <ChevronRight size={18} className="text-gray-300 group-hover:text-blue-400 transition-colors" />
@@ -351,7 +571,7 @@ export const Profile: React.FC<ProfileProps> = ({ user, onLogout }) => {
       </section>
 
       {/* Account Settings */}
-      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100">
+      <section className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 transition-colors">
         <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-6">{t.account}</h3>
         <div className="space-y-2">
           <button 

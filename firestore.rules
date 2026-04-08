@@ -64,11 +64,12 @@ service cloud.firestore {
              data.uid == request.auth.uid &&
              data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
              isValidEmail(data.email) &&
-             (!('age' in data) || (data.age is int && data.age >= 0 && data.age <= 120)) &&
+             (!('age' in data) || (data.age is number && data.age >= 0 && data.age <= 120)) &&
              (!('conditions' in data) || (data.conditions is list && data.conditions.size() <= 10)) &&
-             (!('selectedAvatar' in data) || (data.selectedAvatar is int && data.selectedAvatar >= 0 && data.selectedAvatar <= 7)) &&
-             (!('alertThreshold' in data) || (data.alertThreshold is int && data.alertThreshold >= 50 && data.alertThreshold <= 300)) &&
-             (!('lang' in data) || (data.lang in ['en', 'hi'])) &&
+             (!('selectedAvatar' in data) || (data.selectedAvatar is number && data.selectedAvatar >= 0 && data.selectedAvatar <= 7)) &&
+             (!('alertThreshold' in data) || (data.alertThreshold is number && data.alertThreshold >= 50 && data.alertThreshold <= 300)) &&
+             (!('lang' in data) || (data.lang in ['en', 'hi', 'mr', 'kn', 'ta'])) &&
+             (!('savedLocations' in data) || (data.savedLocations is list && data.savedLocations.size() <= 20)) &&
              (!('darkMode' in data) || (data.darkMode is bool)) &&
              data.createdAt is timestamp;
     }
@@ -76,14 +77,31 @@ service cloud.firestore {
     function isValidTrend(data) {
       return data.keys().hasAll(['uid', 'date', 'aqi', 'location', 'createdAt']) &&
              data.uid == request.auth.uid &&
-             data.aqi is int && data.aqi >= 0 && data.aqi <= 500 &&
+             data.aqi is number && data.aqi >= 0 && data.aqi <= 500 &&
              data.location is string && data.location.size() > 0 && data.location.size() <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['uid', 'userName', 'type', 'desc', 'lat', 'lon', 'createdAt']) &&
+             data.uid == request.auth.uid &&
+             data.userName is string && data.userName.size() > 0 &&
+             data.type in ["Construction", "Traffic", "Smoke", "Industrial", "Dust"] &&
+             data.desc is string && data.desc.size() > 0 && data.desc.size() <= 1000 &&
+             data.lat is number && data.lon is number &&
              data.createdAt is timestamp;
     }
 
     // ===============================================================
     // Rules
     // ===============================================================
+
+    match /reports/{reportId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidReport(request.resource.data);
+      allow update: if false; // Reports are immutable
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.uid == request.auth.uid);
+    }
 
     match /users/{userId} {
       allow read: if isOwner(userId) || isAdmin();

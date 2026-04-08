@@ -21,6 +21,10 @@ async function startServer() {
     const { lat, lon } = req.query;
     const apiKey = process.env.OPENWEATHER_API_KEY;
 
+    if (!lat || !lon) {
+      return res.status(400).json({ error: "Latitude and longitude are required" });
+    }
+
     if (!apiKey) {
       return res.status(500).json({ error: "OPENWEATHER_API_KEY not configured" });
     }
@@ -30,15 +34,21 @@ async function startServer() {
         `https://api.openweathermap.org/data/2.5/air_pollution?lat=${lat}&lon=${lon}&appid=${apiKey}`
       );
       res.json(response.data);
-    } catch (error) {
-      console.error("Error fetching AQI:", error);
-      res.status(500).json({ error: "Failed to fetch AQI data" });
+    } catch (error: any) {
+      console.error("Error fetching AQI:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.message || "Failed to fetch AQI data" 
+      });
     }
   });
 
   app.get("/api/aqi/forecast", async (req, res) => {
     const { lat, lon } = req.query;
     const apiKey = process.env.OPENWEATHER_API_KEY;
+
+    if (!lat || !lon) {
+      return res.status(400).json({ error: "Latitude and longitude are required" });
+    }
 
     if (!apiKey) {
       return res.status(500).json({ error: "OPENWEATHER_API_KEY not configured" });
@@ -49,9 +59,55 @@ async function startServer() {
         `https://api.openweathermap.org/data/2.5/air_pollution/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}`
       );
       res.json(response.data);
-    } catch (error) {
-      console.error("Error fetching forecast:", error);
-      res.status(500).json({ error: "Failed to fetch forecast data" });
+    } catch (error: any) {
+      console.error("Error fetching forecast:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.message || "Failed to fetch forecast data" 
+      });
+    }
+  });
+
+  app.get("/api/weather/current", async (req, res) => {
+    const { lat, lon } = req.query;
+    const apiKey = process.env.OPENWEATHER_API_KEY;
+
+    if (!lat || !lon) {
+      return res.status(400).json({ error: "Latitude and longitude are required" });
+    }
+
+    if (!apiKey) {
+      return res.status(500).json({ error: "OPENWEATHER_API_KEY not configured" });
+    }
+
+    try {
+      const response = await axios.get(
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric`
+      );
+      res.json(response.data);
+    } catch (error: any) {
+      console.error("Error fetching weather:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.message || "Failed to fetch weather data" 
+      });
+    }
+  });
+
+  app.post("/api/predict", async (req, res) => {
+    const { city } = req.body;
+    const predictUrl = process.env.PREDICT_API_URL || "https://trichromatic-neglectingly-barrie.ngrok-free.dev";
+
+    if (!city) {
+      return res.status(400).json({ error: "City is required" });
+    }
+
+    try {
+      const response = await axios.post(`${predictUrl}/predict`, { city });
+      res.json(response.data);
+    } catch (error: any) {
+      console.error("Error fetching prediction:", error.response?.data || error.message);
+      res.status(error.response?.status || 500).json({ 
+        error: error.response?.data?.message || "Failed to fetch prediction data" 
+      });
     }
   });
 
